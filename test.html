@@ -1623,14 +1623,14 @@ class GeometryApp {
                     this.dragStart = worldPos;
                 }
             } else {
-                // 空白处点击，清空选择或框选
+                // 空白处点击，平移视图
+                this.isDragging = true;
+                this.dragStart = { x: e.clientX, y: e.clientY, offsetX: this.renderer.offsetX, offsetY: this.renderer.offsetY };
+                // 清空选择
                 if (!e.ctrlKey && !e.metaKey) {
                     this.selectedObjects.forEach(obj => obj.selected = false);
                     this.selectedObjects.clear();
                 }
-                this.isDragging = true;
-                this.dragStart = worldPos;
-                this.selectionBox = { start: worldPos, end: worldPos };
             }
             
             this.updatePropertiesPanel();
@@ -1772,11 +1772,11 @@ class GeometryApp {
             `x: ${MathUtils.formatNumber(worldPos.x)}, y: ${MathUtils.formatNumber(worldPos.y)}`;
         
         // 视图平移
-        if (this.isDragging && (e.buttons === 4 || e.shiftKey)) {
+        if (this.isDragging && this.dragStart.offsetX !== undefined) {
             const dx = (e.clientX - this.dragStart.x) / this.renderer.scale;
             const dy = (e.clientY - this.dragStart.y) / this.renderer.scale;
             this.renderer.offsetX = this.dragStart.offsetX + dx;
-            this.renderer.offsetY = this.dragStart.offsetY - dy; // Y轴翻转
+            this.renderer.offsetY = this.dragStart.offsetY + dy; // Y轴翻转
             this.render();
             return;
         }
@@ -1832,30 +1832,6 @@ class GeometryApp {
     }
     
     onMouseUp(e) {
-        if (this.selectionBox) {
-            // 完成框选
-            const box = {
-                minX: Math.min(this.selectionBox.start.x, this.selectionBox.end.x),
-                maxX: Math.max(this.selectionBox.start.x, this.selectionBox.end.x),
-                minY: Math.min(this.selectionBox.start.y, this.selectionBox.end.y),
-                maxY: Math.max(this.selectionBox.start.y, this.selectionBox.end.y)
-            };
-            
-            this.objects.forEach(obj => {
-                if (obj.getBounds) {
-                    const bounds = obj.getBounds();
-                    if (bounds.minX >= box.minX && bounds.maxX <= box.maxX &&
-                        bounds.minY >= box.minY && bounds.maxY <= box.maxY) {
-                        this.selectedObjects.add(obj);
-                        obj.selected = true;
-                    }
-                }
-            });
-            
-            this.selectionBox = null;
-            this.updatePropertiesPanel();
-        }
-        
         this.isDragging = false;
         this.dragStart = null;
         this.render();
