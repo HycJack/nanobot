@@ -163,6 +163,34 @@
                 </div>
             </div>
 
+            <!-- DSL命令输入 -->
+            <div class="p-4 border-b border-slate-700/50">
+                <h2 class="font-semibold text-white mb-3">DSL命令</h2>
+                <textarea id="dslInput" rows="8" placeholder="输入DSL命令，例如：
+# 创建点
+point('A', 100, 100)
+point('B', 200, 100)
+point('C', 150, 200)
+
+# 创建线段
+line('AB', 'A', 'B')
+
+# 创建圆
+circle('circle1', 'A', 50)
+
+# 创建多边形
+polygon('triangle', 'A', 'B', 'C')
+
+# 添加约束
+constraint('horizontal', 'AB')" class="w-full p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-slate-300 resize-none"></textarea>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="executeDSL()" class="flex-1 py-2 bg-blue-600/20 text-blue-400 rounded-lg text-sm hover:bg-blue-600/30 transition-colors border border-blue-500/30">执行</button>
+                    <button onclick="clearDSL()" class="py-2 px-3 bg-slate-700/30 text-slate-400 rounded-lg text-sm hover:bg-slate-700/50 transition-colors">清除</button>
+                    <button onclick="loadExampleDSL()" class="py-2 px-3 bg-slate-700/30 text-slate-400 rounded-lg text-sm hover:bg-slate-700/50 transition-colors">示例</button>
+                </div>
+                <div id="dslResult" class="mt-3 p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg text-sm text-slate-400 min-h-[40px]"></div>
+            </div>
+
             <div class="p-4 flex-1 overflow-y-auto">
                 <h2 class="font-semibold text-white mb-3">测量数据</h2>
                 <div id="measurementsPanel" class="space-y-2 text-sm text-slate-300">
@@ -2711,6 +2739,162 @@ class GeometryApp {
         
         return intersections;
     }
+    
+    // DSL解析和执行
+    parseDSL(code) {
+        const commands = [];
+        const lines = code.trim().split('\n');
+        const variables = {};
+        
+        for (let line of lines) {
+            line = line.trim();
+            if (!line || line.startsWith('#')) continue;
+            
+            // 解析命令
+            if (line.startsWith('point(')) {
+                const match = line.match(/point\(([^,]+),\s*([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const name = match[1].trim().replace(/['"]/g, '');
+                    const x = this.evaluateExpression(match[2].trim(), variables);
+                    const y = this.evaluateExpression(match[3].trim(), variables);
+                    commands.push({ type: 'point', name, x, y });
+                }
+            } else if (line.startsWith('line(')) {
+                const match = line.match(/line\(([^,]+),\s*([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const name = match[1].trim().replace(/['"]/g, '');
+                    const start = match[2].trim().replace(/['"]/g, '');
+                    const end = match[3].trim().replace(/['"]/g, '');
+                    commands.push({ type: 'line', name, start, end });
+                }
+            } else if (line.startsWith('ray(')) {
+                const match = line.match(/ray\(([^,]+),\s*([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const name = match[1].trim().replace(/['"]/g, '');
+                    const start = match[2].trim().replace(/['"]/g, '');
+                    const direction = match[3].trim().replace(/['"]/g, '');
+                    commands.push({ type: 'ray', name, start, direction });
+                }
+            } else if (line.startsWith('circle(')) {
+                const match = line.match(/circle\(([^,]+),\s*([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const name = match[1].trim().replace(/['"]/g, '');
+                    const center = match[2].trim().replace(/['"]/g, '');
+                    const radius = this.evaluateExpression(match[3].trim(), variables);
+                    commands.push({ type: 'circle', name, center, radius });
+                }
+            } else if (line.startsWith('polygon(')) {
+                const match = line.match(/polygon\(([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const name = match[1].trim().replace(/['"]/g, '');
+                    const points = match[2].trim().split(',').map(p => p.trim().replace(/['"]/g, ''));
+                    commands.push({ type: 'polygon', name, points });
+                }
+            } else if (line.startsWith('constraint(')) {
+                const match = line.match(/constraint\(([^,]+),\s*([^)]+)\)/);
+                if (match) {
+                    const type = match[1].trim().replace(/['"]/g, '');
+                    const objects = match[2].trim().split(',').map(o => o.trim().replace(/['"]/g, ''));
+                    commands.push({ type: 'constraint', constraintType: type, objects });
+                }
+            } else if (line.includes('=')) {
+                // 变量定义
+                const [varName, expr] = line.split('=').map(s => s.trim());
+                variables[varName] = this.evaluateExpression(expr, variables);
+            }
+        }
+        
+        return { commands, variables };
+    }
+    
+    evaluateExpression(expr, variables) {
+        // 简单表达式求值
+        expr = expr.replace(/\b([a-zA-Z_]+)\b/g, (match) => {
+            return variables[match] !== undefined ? variables[match] : match;
+        });
+        
+        try {
+            return eval(expr);
+        } catch (e) {
+            return parseFloat(expr) || 0;
+        }
+    }
+    
+    executeDSL(code) {
+        try {
+            const { commands } = this.parseDSL(code);
+            const objectMap = new Map();
+            
+            this.saveState();
+            
+            for (const cmd of commands) {
+                switch (cmd.type) {
+                    case 'point':
+                        const point = new Point(cmd.x, cmd.y, { label: cmd.name });
+                        this.objects.push(point);
+                        objectMap.set(cmd.name, point);
+                        break;
+                    
+                    case 'line':
+                        const startPoint = objectMap.get(cmd.start) || this.findObjectByName(cmd.start);
+                        const endPoint = objectMap.get(cmd.end) || this.findObjectByName(cmd.end);
+                        if (startPoint && endPoint) {
+                            const line = new LineSegment(startPoint, endPoint, { showLength: true });
+                            this.objects.push(line);
+                            objectMap.set(cmd.name, line);
+                        }
+                        break;
+                    
+                    case 'ray':
+                        const rayStart = objectMap.get(cmd.start) || this.findObjectByName(cmd.start);
+                        const rayDir = objectMap.get(cmd.direction) || this.findObjectByName(cmd.direction);
+                        if (rayStart && rayDir) {
+                            const ray = new Ray(rayStart, rayDir);
+                            this.objects.push(ray);
+                            objectMap.set(cmd.name, ray);
+                        }
+                        break;
+                    
+                    case 'circle':
+                        const centerPoint = objectMap.get(cmd.center) || this.findObjectByName(cmd.center);
+                        if (centerPoint) {
+                            const circle = new Circle(centerPoint, cmd.radius, { showRadius: true });
+                            this.objects.push(circle);
+                            objectMap.set(cmd.name, circle);
+                        }
+                        break;
+                    
+                    case 'polygon':
+                        const polygonPoints = cmd.points.map(p => objectMap.get(p) || this.findObjectByName(p)).filter(p => p);
+                        if (polygonPoints.length >= 3) {
+                            const polygon = new Polygon(polygonPoints, { closed: true, showArea: true });
+                            this.objects.push(polygon);
+                            objectMap.set(cmd.name, polygon);
+                        }
+                        break;
+                    
+                    case 'constraint':
+                        const constraintObjects = cmd.objects.map(o => objectMap.get(o) || this.findObjectByName(o)).filter(o => o);
+                        if (constraintObjects.length >= 2) {
+                            const constraint = new Constraint(cmd.constraintType, constraintObjects);
+                            this.constraints.add(constraint);
+                        }
+                        break;
+                }
+            }
+            
+            this.constraints.solve();
+            this.render();
+            this.updatePropertiesPanel();
+            return { success: true, message: 'DSL执行成功' };
+        } catch (e) {
+            return { success: false, message: `DSL执行错误: ${e.message}` };
+        }
+    }
+    
+    findObjectByName(name) {
+        return this.objects.find(obj => obj.label === name || obj.name === name);
+    }
 }
 
 // 初始化应用
@@ -2718,6 +2902,63 @@ const app = new GeometryApp();
 
 // 全局访问（用于HTML事件）
 window.app = app;
+
+// DSL命令执行函数
+function executeDSL() {
+    const dslInput = document.getElementById('dslInput');
+    const dslResult = document.getElementById('dslResult');
+    
+    if (!dslInput.value.trim()) {
+        dslResult.innerHTML = '<span class="text-yellow-400">请输入DSL命令</span>';
+        return;
+    }
+    
+    try {
+        const result = app.executeDSL(dslInput.value);
+        if (result.success) {
+            dslResult.innerHTML = `<span class="text-green-400">${result.message}</span>`;
+        } else {
+            dslResult.innerHTML = `<span class="text-red-400">${result.message}</span>`;
+        }
+    } catch (error) {
+        dslResult.innerHTML = `<span class="text-red-400">执行错误: ${error.message}</span>`;
+    }
+}
+
+function clearDSL() {
+    document.getElementById('dslInput').value = '';
+    document.getElementById('dslResult').innerHTML = '';
+}
+
+function loadExampleDSL() {
+    const exampleDSL = `# 创建点
+point('A', 100, 100)
+point('B', 200, 100)
+point('C', 150, 200)
+point('D', 150, 50)
+
+# 创建线段
+line('AB', 'A', 'B')
+line('BC', 'B', 'C')
+line('CA', 'C', 'A')
+
+# 创建射线
+ray('AD', 'A', 'D')
+
+# 创建圆
+circle('circle1', 'A', 50)
+circle('circle2', 'B', 30)
+
+# 创建多边形
+polygon('triangle', 'A', 'B', 'C')
+
+# 添加约束
+constraint('horizontal', 'AB')
+constraint('vertical', 'AD')`;
+    
+    document.getElementById('dslInput').value = exampleDSL;
+    document.getElementById('dslResult').innerHTML = '<span class="text-blue-400">已加载示例DSL</span>';
+}
 </script>
 </body>
 </html>
