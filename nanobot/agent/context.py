@@ -1,4 +1,4 @@
-"""Context builder for assembling agent prompts."""
+"""上下文构建器，用于组装代理提示。"""
 
 import base64
 import mimetypes
@@ -12,53 +12,62 @@ from nanobot.agent.skills import SkillsLoader
 
 class ContextBuilder:
     """
-    Builds the context (system prompt + messages) for the agent.
+    构建代理的上下文（系统提示 + 消息）。
     
-    Assembles bootstrap files, memory, skills, and conversation history
-    into a coherent prompt for the LLM.
+    将引导文件、内存、技能和对话历史组装成
+    一个连贯的 LLM 提示。
     """
     
+    # 引导文件列表
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
     def __init__(self, workspace: Path):
+        """
+        初始化上下文构建器。
+        
+        Args:
+            workspace: 工作目录路径
+        """
         self.workspace = workspace
+        # 内存存储实例
         self.memory = MemoryStore(workspace)
+        # 技能加载器实例
         self.skills = SkillsLoader(workspace)
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
-        Build the system prompt from bootstrap files, memory, and skills.
+        从引导文件、内存和技能构建系统提示。
         
         Args:
-            skill_names: Optional list of skills to include.
+            skill_names: 要包含的可选技能列表。
         
         Returns:
-            Complete system prompt.
+            完整的系统提示。
         """
         parts = []
         
-        # Core identity
+        # 核心身份
         parts.append(self._get_identity())
         
-        # Bootstrap files
+        # 引导文件
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
         
-        # Memory context
+        # 内存上下文
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
         
-        # Skills - progressive loading
-        # 1. Always-loaded skills: include full content
+        # 技能 - 渐进式加载
+        # 1. 始终加载的技能：包含完整内容
         always_skills = self.skills.get_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
         
-        # 2. Available skills: only show summary (agent uses read_file to load)
+        # 2. 可用技能：仅显示摘要（代理使用read_file工具加载）
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
             parts.append(f"""# Skills
@@ -71,7 +80,7 @@ Skills with available="false" need dependencies installed first - you can try in
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self) -> str:
-        """Get the core identity section."""
+        """获取核心身份部分。"""
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
@@ -107,7 +116,7 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
 When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+        """加载工作区中的所有引导文件。"""
         parts = []
         
         for filename in self.BOOTSTRAP_FILES:
@@ -128,38 +137,38 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Build the complete message list for an LLM call.
+        为 LLM 调用构建完整的消息列表。
 
         Args:
-            history: Previous conversation messages.
-            current_message: The new user message.
-            skill_names: Optional skills to include.
-            media: Optional list of local file paths for images/media.
-            channel: Current channel (telegram, feishu, etc.).
-            chat_id: Current chat/user ID.
+            history: 之前的对话消息。
+            current_message: 新的用户消息。
+            skill_names: 要包含的可选技能。
+            media: 图像/媒体的可选本地文件路径列表。
+            channel: 当前通道（telegram、feishu 等）。
+            chat_id: 当前聊天/用户 ID。
 
         Returns:
-            List of messages including system prompt.
+            包含系统提示的消息列表。
         """
         messages = []
 
-        # System prompt
+        # 系统提示
         system_prompt = self.build_system_prompt(skill_names)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
 
-        # History
+        # 历史记录
         messages.extend(history)
 
-        # Current message (with optional image attachments)
+        # 当前消息（带有可选的图像附件）
         user_content = self._build_user_content(current_message, media)
         messages.append({"role": "user", "content": user_content})
 
         return messages
-
+    
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """构建带有可选 base64 编码图像的用户消息内容。"""
         if not media:
             return text
         
@@ -184,16 +193,16 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         result: str
     ) -> list[dict[str, Any]]:
         """
-        Add a tool result to the message list.
+        向消息列表添加工具结果。
         
         Args:
-            messages: Current message list.
-            tool_call_id: ID of the tool call.
-            tool_name: Name of the tool.
-            result: Tool execution result.
+            messages: 当前消息列表。
+            tool_call_id: 工具调用的 ID。
+            tool_name: 工具的名称。
+            result: 工具执行结果。
         
         Returns:
-            Updated message list.
+            更新后的消息列表。
         """
         messages.append({
             "role": "tool",
@@ -211,23 +220,23 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         reasoning_content: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Add an assistant message to the message list.
+        向消息列表添加助手消息。
         
         Args:
-            messages: Current message list.
-            content: Message content.
-            tool_calls: Optional tool calls.
-            reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
+            messages: 当前消息列表。
+            content: 消息内容。
+            tool_calls: 可选的工具调用。
+            reasoning_content: 思考输出（Kimi、DeepSeek-R1 等）。
         
         Returns:
-            Updated message list.
+            更新后的消息列表。
         """
         msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
         
         if tool_calls:
             msg["tool_calls"] = tool_calls
         
-        # Thinking models reject history without this
+        # 思考模型在没有这个字段时会拒绝历史记录
         if reasoning_content:
             msg["reasoning_content"] = reasoning_content
         
