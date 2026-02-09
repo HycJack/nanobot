@@ -2988,30 +2988,18 @@ function clearDSL() {
 }
 
 function loadExampleDSL() {
-    const exampleDSL = `# 创建点
-point('A', 100, 100)
-point('B', 200, 100)
-point('C', 150, 200)
-point('D', 150, 50)
+    const exampleDSL = `# 创建圆心
+point('O', 0, -20)
 
-# 创建线段
-line('AB', 'A', 'B')
-line('BC', 'B', 'C')
-line('CA', 'C', 'A')
+# 创建直线上的两个点（用于定义直线）
+point('A', 0, 20)  # x=0时，y=2
+point('B', 1, 37.32)  # x=1时，y=2+√3（√3≈1.732）
 
-# 创建射线
-ray('AD', 'A', 'D')
+# 创建直线
+line('line1', 'A', 'B')
 
-# 创建圆
-circle('circle1', 'A', 50)
-circle('circle2', 'B', 30)
-
-# 创建多边形
-polygon('triangle', 'A', 'B', 'C')
-
-# 添加约束
-constraint('horizontal', 'AB')
-constraint('vertical', 'AD')`;
+# 创建圆（半径设为2，位于(1,3)范围内验证）
+circle('circle1', 'O', 20)`;
     
     document.getElementById('dslInput').value = exampleDSL;
     document.getElementById('dslResult').innerHTML = '<span class="text-blue-400">已加载示例DSL</span>';
