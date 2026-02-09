@@ -539,7 +539,9 @@ class Circle {
         this.id = Math.random().toString(36).substr(2, 9);
         this.type = 'circle';
         this.center = center;
-        this.radius = radius;
+        this.radiusPoint = options.radiusPoint || null;
+        // 如果有radiusPoint，使用它与center的距离作为半径
+        this.radius = this.radiusPoint ? this.center.distanceTo(this.radiusPoint) : radius;
         this.name = options.name || '';
         this.style = {
             color: options.color || '#f472b6',
@@ -603,6 +605,10 @@ class Circle {
         if (!this.center.locked) {
             this.center.x += dx;
             this.center.y += dy;
+        }
+        if (this.radiusPoint && !this.radiusPoint.locked) {
+            this.radiusPoint.x += dx;
+            this.radiusPoint.y += dy;
         }
     }
     
@@ -1247,12 +1253,29 @@ class Renderer {
         if (circle.showRadius) {
             ctx.beginPath();
             ctx.moveTo(center.x, center.y);
-            ctx.lineTo(center.x + radius, center.y);
+            if (circle.radiusPoint) {
+                // 从圆心画到radiusPoint
+                const radiusPointPos = this.worldToScreen(circle.radiusPoint.x, circle.radiusPoint.y);
+                ctx.lineTo(radiusPointPos.x, radiusPointPos.y);
+            } else {
+                // 保持原逻辑
+                ctx.lineTo(center.x + radius, center.y);
+            }
             ctx.strokeStyle = 'rgba(244, 114, 182, 0.5)';
             ctx.lineWidth = 1;
             ctx.stroke();
             
-            this.drawLabel(center.x + radius/2, center.y - 10, `r=${MathUtils.formatNumber(circle.radius)}`, '#f472b6');
+            // 标签位置
+            let labelX, labelY;
+            if (circle.radiusPoint) {
+                const radiusPointPos = this.worldToScreen(circle.radiusPoint.x, circle.radiusPoint.y);
+                labelX = (center.x + radiusPointPos.x) / 2;
+                labelY = (center.y + radiusPointPos.y) / 2 - 10;
+            } else {
+                labelX = center.x + radius/2;
+                labelY = center.y - 10;
+            }
+            this.drawLabel(labelX, labelY, `r=${MathUtils.formatNumber(circle.radius)}`, '#f472b6');
         }
         
         // 直径标注
@@ -1387,6 +1410,9 @@ class Renderer {
             case 'line':
                 this.drawLineSegment(obj);
                 break;
+            case 'ray':
+                this.drawRay(obj);
+                break;
             case 'circle':
                 this.drawCircle(obj);
                 break;
@@ -1417,6 +1443,7 @@ class GeometryApp {
         this.lastMousePos = null;
         this.snapPoint = null;
         this.tempObject = null; // 预览对象
+        this.hoverObject = null; // 悬停对象
         
         // 工具状态
         this.toolState = {
@@ -1678,6 +1705,10 @@ class GeometryApp {
             
             if (!this.toolState.lineStart) {
                 this.toolState.lineStart = pos;
+                // 创建临时射线对象用于预览
+                const start = new Point(pos.x, pos.y);
+                const end = new Point(pos.x, pos.y);
+                this.tempObject = new Ray(start, end);
             } else {
                 this.saveState();
                 const startPoint = this.findOrCreatePoint(this.toolState.lineStart);
@@ -1694,13 +1725,16 @@ class GeometryApp {
             
             if (!this.toolState.compassCenter) {
                 this.toolState.compassCenter = pos;
+                // 创建临时圆对象用于预览
+                const center = new Point(pos.x, pos.y);
+                this.tempObject = new Circle(center, 0, { showRadius: true });
             } else {
                 this.saveState();
                 const center = this.findOrCreatePoint(this.toolState.compassCenter);
                 const radiusPoint = this.findOrCreatePoint(pos);
                 const radius = center.distanceTo(radiusPoint);
                 
-                const circle = new Circle(center, radius, { showRadius: true });
+                const circle = new Circle(center, radius, { showRadius: true, radiusPoint: radiusPoint });
                 this.objects.push(circle);
                 this.resetToolState();
                 this.render();
@@ -1786,9 +1820,33 @@ class GeometryApp {
             const dx = worldPos.x - this.lastMousePos.x;
             const dy = worldPos.y - this.lastMousePos.y;
             
+            // 检查是否拖动的是圆的radiusPoint
+            let draggedCircle = null;
+            let draggedRadiusPoint = null;
+            
             this.selectedObjects.forEach(obj => {
-                if (obj.translate) obj.translate(dx, dy);
+                if (obj.type === 'point') {
+                    // 检查该点是否是某个圆的radiusPoint
+                    for (const circle of this.objects) {
+                        if (circle.type === 'circle' && circle.radiusPoint === obj) {
+                            draggedCircle = circle;
+                            draggedRadiusPoint = obj;
+                            break;
+                        }
+                    }
+                }
             });
+            
+            if (draggedCircle && draggedRadiusPoint) {
+                // 只移动radiusPoint，更新圆的半径
+                draggedRadiusPoint.translate(dx, dy);
+                draggedCircle.radius = draggedCircle.center.distanceTo(draggedRadiusPoint);
+            } else {
+                // 普通对象移动
+                this.selectedObjects.forEach(obj => {
+                    if (obj.translate) obj.translate(dx, dy);
+                });
+            }
             
             // 解决约束
             if (this.constraints.constraints.length > 0) {
@@ -1810,10 +1868,25 @@ class GeometryApp {
         // 工具预览
         this.snapPoint = this.findSnapPoint(worldPos);
         
+        // 检测悬停对象
+        if (this.currentTool === 'select' && !this.isDragging) {
+            this.hoverObject = this.getObjectAt(worldPos);
+        } else {
+            this.hoverObject = null;
+        }
+        
         if (this.tempObject) {
             if (this.currentTool === 'line' && this.toolState.lineStart) {
                 this.tempObject.end.x = worldPos.x;
                 this.tempObject.end.y = worldPos.y;
+            } else if (this.currentTool === 'ray' && this.toolState.lineStart) {
+                this.tempObject.end.x = worldPos.x;
+                this.tempObject.end.y = worldPos.y;
+            } else if (this.currentTool === 'circle' && this.toolState.compassCenter) {
+                const center = new Point(this.toolState.compassCenter.x, this.toolState.compassCenter.y);
+                const radius = center.distanceTo(worldPos);
+                this.tempObject.center = center;
+                this.tempObject.radius = radius;
             }
         }
         
@@ -1891,10 +1964,18 @@ class GeometryApp {
     }
     
     getObjectAt(pos, tolerance = 10) {
-        // 从后往前找（先画的在下层）
+        // 优先检查所有点对象，确保点的移动事件优先于其他移动事件
         for (let i = this.objects.length - 1; i >= 0; i--) {
             const obj = this.objects[i];
-            if (obj.contains && obj.contains(pos, tolerance / this.renderer.scale)) {
+            if (obj.type === 'point' && obj.contains(pos, tolerance / this.renderer.scale)) {
+                return obj;
+            }
+        }
+        
+        // 然后检查其他对象
+        for (let i = this.objects.length - 1; i >= 0; i--) {
+            const obj = this.objects[i];
+            if (obj.type !== 'point' && obj.contains && obj.contains(pos, tolerance / this.renderer.scale)) {
                 return obj;
             }
         }
@@ -2016,22 +2097,22 @@ class GeometryApp {
         this.objects.forEach(obj => {
             switch (obj.type) {
                 case 'point':
-                    this.renderer.drawPoint(obj, obj === this.snapPoint);
+                    this.renderer.drawPoint(obj, obj === this.snapPoint || obj === this.hoverObject);
                     break;
                 case 'line':
-                    this.renderer.drawLineSegment(obj);
+                    this.renderer.drawLineSegment(obj, obj === this.hoverObject);
                     break;
                 case 'ray':
-                    this.renderer.drawRay(obj);
+                    this.renderer.drawRay(obj, obj === this.hoverObject);
                     break;
                 case 'circle':
-                    this.renderer.drawCircle(obj);
+                    this.renderer.drawCircle(obj, obj === this.hoverObject);
                     break;
                 case 'polygon':
-                    this.renderer.drawPolygon(obj);
+                    this.renderer.drawPolygon(obj, obj === this.hoverObject);
                     break;
                 case 'angle':
-                    this.renderer.drawAngle(obj);
+                    this.renderer.drawAngle(obj, obj === this.hoverObject);
                     break;
             }
         });
